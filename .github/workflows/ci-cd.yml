@@ -9,7 +9,7 @@ on:
 env:
   AZURE_WEBAPP_NAME: 'app-cloudflash-prod'
   AZURE_WEBAPP_PACKAGE_PATH: './src/CloudFlash.API'
-  DOTNET_VERSION: '8.0.x'
+  DOTNET_VERSION: '9.0.x'
   REGISTRY_NAME: 'acrcloudflashprod'
   IMAGE_NAME: 'cloudflash'
 
@@ -21,7 +21,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     
@@ -48,7 +48,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Setup .NET
-      uses: actions/setup-dotnet@v3
+      uses: actions/setup-dotnet@v4
       with:
         dotnet-version: ${{ env.DOTNET_VERSION }}
     
