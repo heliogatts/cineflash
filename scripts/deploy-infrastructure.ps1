@@ -16,10 +16,19 @@ param(
     [string]$SubscriptionId
 )
 
-# Verificar se Azure CLI está instalado
+# Verificar se Azure CLI está instalado e autenticado
 if (-not (Get-Command az -ErrorAction SilentlyContinue)) {
     Write-Error "Azure CLI não está instalado. Instale em: https://docs.microsoft.com/en-us/cli/azure/install-azure-cli"
     exit 1
+}
+
+# Verificar versão mínima do Azure CLI
+$azVersion = az version | ConvertFrom-Json
+$minVersion = [Version]"2.60.0"
+$currentVersion = [Version]$azVersion.'azure-cli'
+if ($currentVersion -lt $minVersion) {
+    Write-Warning "Azure CLI versão $($azVersion.'azure-cli') detectada. Recomendado: $minVersion ou superior"
+    Write-Host "   Execute: az upgrade" -ForegroundColor Yellow
 }
 
 # Login no Azure se necessário
@@ -39,7 +48,12 @@ if ($SubscriptionId) {
 $rgExists = az group exists --name $ResourceGroupName
 if ($rgExists -eq "false") {
     Write-Host "Criando Resource Group: $ResourceGroupName" -ForegroundColor Green
-    az group create --name $ResourceGroupName --location $Location
+    az group create --name $ResourceGroupName --location $Location --tags "project=CloudFlash" "environment=$Environment"
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Error "Falha ao criar Resource Group"
+        exit 1
+    }
 }
 
 # Deploy da infraestrutura usando Bicep
@@ -54,6 +68,30 @@ $appServiceSku = switch ($Environment) {
     "staging" { "S1" }
     "prod" { "P1v3" }
 }
+
+# Validar se o arquivo Bicep existe
+if (-not (Test-Path $bicepFile)) {
+    Write-Error "Arquivo Bicep não encontrado: $bicepFile"
+    exit 1
+}
+
+Write-Host "Validando template Bicep..." -ForegroundColor Yellow
+az deployment group validate `
+    --resource-group $ResourceGroupName `
+    --template-file $bicepFile `
+    --parameters `
+    baseName="cloudflash" `
+    environment=$Environment `
+    location=$Location `
+    appServicePlanSku=$appServiceSku `
+    tmdbApiKey=$TmdbApiKey
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "Validação do template Bicep falhou"
+    exit 1
+}
+
+Write-Host "✅ Template Bicep validado com sucesso!" -ForegroundColor Green
 
 $deploymentResult = az deployment group create `
     --resource-group $ResourceGroupName `
