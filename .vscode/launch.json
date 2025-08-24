@@ -1,0 +1,38 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch CloudFlash API",
+            "type": "coreclr",
+            "request": "launch",
+            "preLaunchTask": "build",
+            "program": "${workspaceFolder}/src/CloudFlash.API/bin/Debug/net8.0/CloudFlash.API.dll",
+            "args": [],
+            "cwd": "${workspaceFolder}/src/CloudFlash.API",
+            "console": "integratedTerminal",
+            "stopAtEntry": false,
+            "env": {
+                "ASPNETCORE_ENVIRONMENT": "Development"
+            },
+            "sourceFileMap": {
+                "/Views": "${workspaceFolder}/Views"
+            }
+        },
+        {
+            "name": "Attach to CloudFlash API",
+            "type": "coreclr",
+            "request": "attach"
+        },
+        {
+            "name": "Launch CloudFlash API (Docker)",
+            "type": "docker",
+            "request": "launch",
+            "preLaunchTask": "docker-run: debug",
+            "dockerServerReadyAction": {
+                "action": "openExternally",
+                "pattern": "\\bNow listening on:\\s+(https?://\\S+)",
+                "uriFormat": "%s"
+            }
+        }
+    ]
+}
