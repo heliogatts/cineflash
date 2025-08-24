@@ -7,15 +7,25 @@ param(
     [string]$ResourceGroupName = "rg-cloudflash-$Environment",
     
     [Parameter(Mandatory = $false)]
-    [string]$ImageTag = "latest"
+    [string]$ImageTag = "latest",
+
+    [Parameter(Mandatory = $false)]
+    [string]$DockerBuildTarget
 )
 
 # Verificar se Docker está rodando
+Write-Host "Verificando se Docker está disponível..." -ForegroundColor Yellow
 $dockerStatus = docker info 2>$null
 if (-not $dockerStatus) {
     Write-Error "Docker não está rodando. Inicie o Docker Desktop."
+    Write-Host "Para Windows: Inicie o Docker Desktop" -ForegroundColor Yellow
+    Write-Host "Para Linux: sudo systemctl start docker" -ForegroundColor Yellow
     exit 1
 }
+
+# Verificar versão do Docker
+$dockerVersion = docker --version
+Write-Host "✅ Docker disponível: $dockerVersion" -ForegroundColor Green
 
 # Carregar outputs da infraestrutura
 $outputFile = "$PSScriptRoot/../.azure-outputs-$Environment.json"
@@ -55,13 +65,22 @@ $projectRoot = Split-Path $PSScriptRoot -Parent
 Push-Location $projectRoot
 
 try {
-    # Build da imagem
-    docker build -t $fullImageName .
+    # Build da imagem com cache e multi-stage otimization
+    Write-Host "Construindo imagem Docker com otimizações..." -ForegroundColor Yellow
+    if ($null -ne $DockerBuildTarget -and $DockerBuildTarget -ne "") {
+        docker build -t $fullImageName . --target $DockerBuildTarget --progress=plain
+    } else {
+        docker build -t $fullImageName . --progress=plain
+    }
     
     if ($LASTEXITCODE -ne 0) {
         Write-Error "Falha no build da imagem Docker"
         exit 1
     }
+    
+    # Verificar tamanho da imagem
+    $imageSize = docker images $fullImageName --format "table {{.Size}}" | Select-Object -Skip 1
+    Write-Host "✅ Imagem criada com sucesso! Tamanho: $imageSize" -ForegroundColor Green
     
     # Push da imagem
     Write-Host "Fazendo push da imagem para o Container Registry..." -ForegroundColor Yellow
@@ -71,6 +90,8 @@ try {
         Write-Error "Falha no push da imagem Docker"
         exit 1
     }
+    
+    Write-Host "✅ Push concluído com sucesso!" -ForegroundColor Green
     
     # Deploy para App Service
     Write-Host "Fazendo deploy para o App Service..." -ForegroundColor Yellow
@@ -99,15 +120,35 @@ try {
     Write-Host "Aguardando aplicação inicializar..." -ForegroundColor Yellow
     Start-Sleep -Seconds 30
     
-    try {
-        $healthResponse = Invoke-RestMethod -Uri "$appUrl/api/v1/health" -Method Get -TimeoutSec 10
-        Write-Host "Health Check: ✅ SUCESSO" -ForegroundColor Green
-        Write-Host "Status: $($healthResponse.status)" -ForegroundColor Green
-        Write-Host "Versão: $($healthResponse.version)" -ForegroundColor Green
+    # Fazer múltiplas tentativas de health check
+    $maxRetries = 5
+    $retryCount = 0
+    $healthCheckSuccess = $false
+    
+    while ($retryCount -lt $maxRetries -and -not $healthCheckSuccess) {
+        try {
+            $retryCount++
+            Write-Host "Tentativa $retryCount/$maxRetries - Verificando saúde da aplicação..." -ForegroundColor Yellow
+            
+            $healthResponse = Invoke-RestMethod -Uri "$appUrl/api/v1/health" -Method Get -TimeoutSec 10
+            Write-Host "Health Check: ✅ SUCESSO" -ForegroundColor Green
+            Write-Host "Status: $($healthResponse.status)" -ForegroundColor Green
+            Write-Host "Versão: $($healthResponse.version)" -ForegroundColor Green
+            $healthCheckSuccess = $true
+        }
+        catch {
+            Write-Host "Tentativa $retryCount falhou: $($_.Exception.Message)" -ForegroundColor Yellow
+            if ($retryCount -lt $maxRetries) {
+                Write-Host "Aguardando 15 segundos antes da próxima tentativa..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 15
+            }
+        }
     }
-    catch {
-        Write-Warning "Health Check falhou - a aplicação pode ainda estar inicializando"
+    
+    if (-not $healthCheckSuccess) {
+        Write-Warning "Health Check falhou após $maxRetries tentativas"
         Write-Host "Verifique manualmente em: $appUrl/api/v1/health" -ForegroundColor Yellow
+        Write-Host "Verifique os logs: az webapp log tail --name $appServiceName --resource-group $ResourceGroupName" -ForegroundColor Yellow
     }
     
     Write-Host "`nPróximos passos:" -ForegroundColor Yellow
